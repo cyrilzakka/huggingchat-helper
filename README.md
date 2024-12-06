@@ -1,4 +1,4 @@
-# Editor Content Server
+# HuggingChat VSCode Helper
 A simple VSCode extension that exposes the active editor content via a local HTTP server. For use with the HuggingChat macOS app.
 
 ## Features
