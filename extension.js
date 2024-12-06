@@ -1,75 +1,146 @@
 const vscode = require('vscode');
 const http = require('http');
+const crypto = require('crypto');
 
+// Generate a unique ID for this window
+const windowId = crypto.randomBytes(16).toString('hex');
+
+// Keep track of when this window was last focused
+let lastFocusTime = 0;
+let activeEditor = null;
 let server = null;
+let serverPort = null;
 
-function startServer() {
+function updateActiveEditor() {
+    activeEditor = vscode.window.activeTextEditor;
+    if (vscode.window.state.focused) {
+        lastFocusTime = Date.now();
+    }
+}
+
+async function startServer() {
     if (server) {
-        // vscode.window.showInformationMessage('Hugging is already running');
         return;
     }
 
-    server = http.createServer((req, res) => {
-        if (req.method === 'GET') {
-            const editor = vscode.window.activeTextEditor;
-            const content = editor?.document.getText() || '';
+    // Try ports in range 54321-54330
+    for (let port = 54321; port <= 54330; port++) {
+        try {
+            server = http.createServer((req, res) => {
+                if (req.method === 'GET') {
+                    res.setHeader('Access-Control-Allow-Origin', '*');
+                    res.setHeader('Content-Type', 'application/json');
+                    
+                    // Only return content if this window/server is still active
+                    if (!server) {
+                        res.statusCode = 404;
+                        res.end(JSON.stringify({ error: 'Window closed' }));
+                        return;
+                    }
+                    
+                    res.end(JSON.stringify({
+                        windowId: windowId,
+                        lastFocusTime: lastFocusTime,
+                        content: activeEditor?.document.getText() || '',
+                        language: activeEditor?.document.languageId,
+                        fileName: activeEditor?.document.fileName,
+                        timestamp: new Date().toISOString(),
+                        isFocused: vscode.window.state.focused,
+                        port: serverPort  // Include port for debugging
+                    }));
+                }
+            });
+
+            await new Promise((resolve, reject) => {
+                server.listen(port, '127.0.0.1', () => {
+                    serverPort = port;
+                    resolve();
+                });
+                server.on('error', reject);
+            });
+
+            console.log(`Editor content server started on port ${port} for window ${windowId}`);
             
-            res.setHeader('Access-Control-Allow-Origin', '*');
-            res.setHeader('Content-Type', 'application/json');
+            // Set up error handling
+            server.on('error', (error) => {
+                console.error(`Server error on port ${serverPort}: ${error}`);
+                stopServer();
+            });
             
-            res.end(JSON.stringify({
-                content: content,
-                language: editor?.document.languageId,
-                fileName: editor?.document.fileName
-            }));
+            return;
+
+        } catch (error) {
+            console.log(`Port ${port} in use, trying next port...`);
+            continue;
         }
-    });
+    }
 
-    server.listen(54321, '127.0.0.1', () => {
-        // vscode.window.showInformationMessage('Editor content server started on port 54321');
-    });
-
-    server.on('error', (error) => {
-        vscode.window.showErrorMessage(`Server error: ${error.message}`);
-        server = null;
-    });
+    vscode.window.showErrorMessage('Failed to start server: all ports in use');
 }
 
 function stopServer() {
     if (!server) {
-        vscode.window.showInformationMessage('Server is not running');
         return;
     }
 
+    const port = serverPort;
     server.close(() => {
-        vscode.window.showInformationMessage('Editor content server stopped');
-        server = null;
+        console.log(`Editor content server stopped on port ${port} for window ${windowId}`);
     });
+    
+    // Immediately clear these so no new requests are processed
+    server = null;
+    serverPort = null;
 }
-/**
- * @param {vscode.ExtensionContext} context
- */
+
 function activate(context) {
-	console.log('Activated huggingchat-helper. You should now be able to use the HuggingChat with VSCode.');
-	
-	// Register commands
-    let startCommand = vscode.commands.registerCommand('huggingchat-helper.start', startServer);
-    let stopCommand = vscode.commands.registerCommand('huggingchat-helper.stop', stopServer);
+    console.log(`Activating extension for window ${windowId}`);
+    
+    updateActiveEditor();
+    
+    // Track window focus and editor changes
+    context.subscriptions.push(
+        vscode.window.onDidChangeActiveTextEditor(() => {
+            updateActiveEditor();
+        })
+    );
 
-    context.subscriptions.push(startCommand);
-    context.subscriptions.push(stopCommand);
+    context.subscriptions.push(
+        vscode.window.onDidChangeWindowState(e => {
+            if (e.focused) {
+                updateActiveEditor();
+            }
+        })
+    );
 
-    // Start server on activation
     startServer();
-    vscode.window.showInformationMessage('HuggingChat extension activated.');
+
+    // Ensure server is stopped when this specific window is closed
+    context.subscriptions.push({ 
+        dispose: () => {
+            console.log(`Disposing extension for window ${windowId}`);
+            stopServer();
+        } 
+    });
+
+    // Additional cleanup for window close events
+    context.subscriptions.push(
+        vscode.workspace.onDidCloseTextDocument(() => {
+            // If there are no more editors in this window, stop the server
+            if (!vscode.window.visibleTextEditors.length) {
+                console.log(`No more editors in window ${windowId}, stopping server`);
+                stopServer();
+            }
+        })
+    );
 }
 
-// This method is called when your extension is deactivated
 function deactivate() {
+    console.log(`Deactivating extension for window ${windowId}`);
     stopServer();
 }
 
 module.exports = {
-	activate,
-	deactivate
+    activate,
+    deactivate
 }
