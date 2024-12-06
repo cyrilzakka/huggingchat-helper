@@ -97,6 +97,26 @@ function activate(context) {
     console.log(`Activating extension for window ${windowId}`);
     
     updateActiveEditor();
+
+    // Register commands
+    let startCommand = vscode.commands.registerCommand('huggingchat-helper.start', () => {
+        if (server) {
+            vscode.window.showInformationMessage('HuggingChat Helper is already running');
+            return;
+        }
+        startServer();
+    });
+
+    let stopCommand = vscode.commands.registerCommand('huggingchat-helper.stop', () => {
+        if (!server) {
+            vscode.window.showInformationMessage('HuggingChat Helper is not running');
+            return;
+        }
+        stopServer();
+    });
+
+    context.subscriptions.push(startCommand);
+    context.subscriptions.push(stopCommand);
     
     // Track window focus and editor changes
     context.subscriptions.push(
