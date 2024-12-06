@@ -44,6 +44,7 @@ async function startServer() {
                         content: activeEditor?.document.getText() || '',
                         language: activeEditor?.document.languageId,
                         fileName: activeEditor?.document.fileName,
+                        selectedText: activeEditor?.selection ? activeEditor.document.getText(activeEditor.selection) : '',
                         timestamp: new Date().toISOString(),
                         isFocused: vscode.window.state.focused,
                         port: serverPort  // Include port for debugging
@@ -88,7 +89,6 @@ function stopServer() {
         console.log(`Editor content server stopped on port ${port} for window ${windowId}`);
     });
     
-    // Immediately clear these so no new requests are processed
     server = null;
     serverPort = null;
 }
